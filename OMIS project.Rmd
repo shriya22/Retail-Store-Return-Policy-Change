@@ -1,0 +1,2827 @@
+
+```{r}
+rm(list = ls())
+
+setwd("C:/Users/nertekin/Dropbox/Santa Clara Teaching/OMIS 2392/RProjects/Week-2")
+
+# install packages
+install.packages("ggeffects")
+install.packages("QuantPsyc")
+install.packages("readstata13")
+
+# Load libraries everytime you start a session
+library(stargazer)
+library(gdata)
+library(ggplot2)
+library(psych) 
+library(ggeffects)
+library(QuantPsyc)
+library(readstata13)
+install.packages("ggeffects")
+
+install.packages("QuantPsyc")
+install.packages("VIF")
+install.packages("usdm")
+install.packages("lmtest")
+install.packages("multiwayvcov")
+install.packages("sandwich")
+install.packages("AER")
+
+
+
+library(VIF)
+library(usdm)
+library(lmtest)
+
+library(multiwayvcov)
+library(sandwich)
+library(foreign)
+
+library(AER)
+library(MASS)
+
+# turn off scientific notation except for big numbers. 
+options(scipen = 9)
+```
+
+```{r}
+#impact on online sales 
+online1=read.dta13("C:/Users/Dell/Downloads/Online store daily prod_cat sales-returns.dta")
+online2=read.dta13("C:/Users/Dell/Downloads/Online store daily sales-returns.dta")
+bm1=read.dta13("C:/Users/Dell/Downloads/BM store monthly prod_cat sales-returns.dta")
+
+
+stargazer(online2, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+df <- online2[c("avg_age","avg_female","avg_income")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+
+#generate dummy for time and group
+
+online2$group=ifelse(online2$policy=="60 days" ,0,1)
+
+online2$time1=ifelse(online2$year==2013 & online2$month_dummy<10,0,1)
+
+
+
+#check for log sales 
+ggplot(online2, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online2, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(online2,aes(x=returnvalue))+geom_histogram(color="blue")
+ggplot(online2,aes(x=log(returnvalue)))+geom_histogram(color="blue")
+
+ggplot(online2,aes(x=returnquantity))+geom_histogram(color="blue")
+ggplot(online2,aes(x=log(returnquantity)))+geom_histogram(color="blue")
+
+online2$avg_female <- ifelse(is.na(online2$avg_female), mean(online2$avg_female, na.rm=TRUE), online2$avg_female)
+online2$avg_age<- ifelse(is.na(online2$avg_age), mean(online2$avg_age, na.rm=TRUE), online2$avg_age)
+online2$avg_income <- ifelse(is.na(online2$avg_income), mean(online2$avg_income, na.rm=TRUE), online2$avg_income)
+
+
+#model1 sales value
+model1=lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)
+
+
+stargazer(model1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)) #obtain fitted values
+residual=resid(model1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model1) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model1) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model1, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model1, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model1, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(model1,model1,model1 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+
+
+
+#model 2 sales quantity 
+
+
+
+model2=lm(salesquantity~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)
+stargazer(model2,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#check whether ols is right model 
+online2$pred_sales_quantity<-predict(model2) # let's look at the predicted purchase quantity for each observation in the data 
+
+ggplot(online2, aes(pred_purchase_quantity)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(online2$pred_sales_quantity)#####no ols range is negative
+
+
+
+#poisson
+
+poisson1 <- glm(salesquantity ~ time1*group+avg_female+avg_age+avg_income,family="poisson",data=online2)
+
+
+stargazer(poisson1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+## Model fit assessment 
+poisson1a <- glm(salesquantity~1, data=online2, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson1, poisson1a) 
+
+#check for heteroskedacity
+pred<-predict( glm(salesquantity ~ time1*group+avg_female+avg_age+avg_income,family="poisson",data=online2)) #obtain fitted values
+residual=resid(poisson1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(poisson1) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson1) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(poisson1, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(poisson1, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(poisson1, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(poisson1,poisson1,poisson1 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+##negative binomial
+
+negbin1 <- glm.nb(salesquantity~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)
+stargazer(negbin1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# Model fit assessment
+negbin1a <- glm.nb(salesquantity ~ 1, data = online2) 
+
+lrtest(negbin1, negbin1a) 
+
+lrtest(poisson1, negbin1)
+
+# Obtain IRRs
+stargazer(negbin1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#chekc heteroskedacity
+pred<-predict(glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=online2)) #obtain fitted values
+residual=resid(negbin1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin1) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+
+
+
+consstder <- sqrt(diag(vcovHC(negbin1, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin1, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin1, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin1,negbin1,negbin1 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin1, negbin1,negbin1 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+#policy has no effect on sales in the online stores 
+
+
+
+```
+
+```{r}
+##What is the impact of the policy change on physical store sales?
+
+bm2=read.dta13("C:/Users/Dell/Downloads/BM store monthly sales-returns.dta")
+##bm22=read.dta13("C:/Users/Dell/Downloads/BM store monthly sales-returns.dta")
+stargazer(bm2, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+
+bm2$avg_female <- ifelse(is.na(bm2$avg_female), mean(bm2$avg_female, na.rm=TRUE), bm2$avg_female)
+bm2$avg_age<- ifelse(is.na(bm2$avg_age), mean(bm2$avg_age, na.rm=TRUE), bm2$avg_age)
+
+bm2$avg_income <- ifelse(is.na(bm2$avg_income), mean(bm2$avg_income, na.rm=TRUE), bm2$avg_income)
+bm2$store_average_price <- ifelse(is.na(bm2$store_average_price), mean(bm2$store_average_price, na.rm=TRUE), bm2$store_average_price)
+bm2$store_number_of_skus <- ifelse(is.na(bm2$store_number_of_skus), mean(bm2$store_number_of_skus, na.rm=TRUE), bm2$store_number_of_skus)
+bm2$sa_gender  <- ifelse(is.na(bm2$sa_gender ), mean(bm2$sa_gender , na.rm=TRUE), bm2$sa_gender )
+bm2$sa_full_time <- ifelse(is.na(bm2$sa_full_time), mean(bm2$sa_full_time, na.rm=TRUE), bm2$sa_full_time)
+bm2$sa_avg_years_of_exp <- ifelse(is.na(bm2$sa_avg_years_of_exp), mean(bm2$sa_avg_years_of_exp, na.rm=TRUE), bm2$sa_avg_years_of_exp)
+bm2$sa_married <- ifelse(is.na(bm2$sa_married), mean(bm2$sa_married, na.rm=TRUE), bm2$sa_married)
+bm2$sa_avg_rate_of_pay <- ifelse(is.na(bm2$sa_avg_rate_of_pay), mean(bm2$sa_avg_rate_of_pay, na.rm=TRUE), bm2$sa_avg_rate_of_pay)
+bm2$sa_dependent <- ifelse(is.na(bm2$sa_dependent), mean(bm2$sa_dependent, na.rm=TRUE), bm2$sa_dependent)
+bm2$sales_volume_group <- ifelse(is.na(bm2$sales_volume_group), mean(bm2$sales_volume_group, na.rm=TRUE), bm2$sales_volume_group)
+
+
+
+
+
+#check multicollinearity
+
+df <- bm2[c("avg_female","avg_age","avg_income","store_number_of_skus","sa_gender","sa_full_time","store_average_price","sa_avg_years_of_exp","sa_married","sa_avg_rate_of_pay","sa_dependent","sales_volume_group")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+#generate dummy for time and group
+
+bm2$group=ifelse(bm2$policy=="60 days" ,0,1)
+
+bm2$time1=ifelse(bm2$year==2013 & bm2$month_dummy<10,0,1)
+
+
+#check for log sales 
+ggplot(bm2, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm2, aes(x=returnvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(returnvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm2, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm2, aes(x=returnquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(returnquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+
+
+
+#model1 salesvalue
+model11=lm(log(salesvalue)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm2)
+
+stargazer(model11,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm2)) #obtain fitted values
+residual=resid(model11) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model11) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model11) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model11, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model11, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model11, bm2$store_number))) # produces clustered robust standard errors
+
+stargazer(model11,
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects3 <- ggpredict(model11, terms=c("time1", "group")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) # make the plot more self-readable
+
+
+
+##model2 salesquantity
+
+poisson2 <- glm(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,family="poisson",data=bm2)
+
+
+stargazer(poisson2,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson2a <- glm(salesquantity~1, data=bm2, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson2, poisson2a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+#check for heteroskedacity
+pred1<-predict(glm(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,family="poisson",data=bm2) ) #obtain fitted values
+residual=resid(poisson2) # obtain residuals
+
+df <- data.frame(pred1,residual)
+ggplot(df, aes(y=residual, x=pred1)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(poisson2) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson2) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(poisson2, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(poisson2, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(poisson2, bm2$brand_number))) # produces clustered robust standard errors
+
+stargazer(poisson2,poisson2,poisson2 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+##neg bin
+
+negbin2 <- glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm2)
+stargazer(negbin2,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# Model fit assessment
+negbin2a <- glm.nb(salesquantity ~ 1, data = bm2) 
+
+lrtest(negbin2, negbin2a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson2, negbin2)
+
+# Obtain IRRs
+
+stargazer(negbin2, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedacity
+pred3<-predict(glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm2)) #obtain fitted values
+residual=resid(negbin2) # obtain residuals
+
+df <- data.frame(pred3,residual)
+ggplot(df, aes(y=residual, x=pred3)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin2) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model2) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin2, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin2, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin2, bm2$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin2,negbin2,negbin2 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+stargazer(negbin2 , 
+          se=list(clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+meffects3 <- ggpredict(negbin2, terms=c("time1", "group"))# generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line() + 
+    xlab("Time") + ylab(" sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) # make the plot more self-readable
+
+
+
+#########sales value is signifincant in cluster but salesquantity is insignificant 
+#poisson signi but no model fit ,negbin no signi but model fit and better than poisson hence policy has no effect on sales quantity but has on sales val ue 
+
+
+```
+
+```{r}
+###What is the impact of the policy change on online channel returns?
+
+
+  
+stargazer(online2, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+df <- online2[c("salesvalue","avg_income","avg_age","avg_female")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+#check for log sales 
+ggplot(online2, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online2, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(online2,aes(x=returnvalue))+geom_histogram(color="blue")
+ggplot(online2,aes(x=log(returnvalue)))+geom_histogram(color="blue")
+
+ggplot(online2,aes(x=returnquantity))+geom_histogram(color="blue")
+ggplot(online2,aes(x=log(returnvalue)))+geom_histogram(color="blue")
+
+
+ggplot(online2, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online2, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+#model1 reutrn value
+model4=lm(log(returnvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+logsalesv,data=online2)
+
+online2$logsalesv=log(online2$salesvalue+1)
+
+
+stargazer(model4,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#check for heteroskedacity
+
+pred<-predict(lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+log(salesvalue+1),data=online2)) #obtain fitted values
+residual=resid(model4) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model4) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model4) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model4, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model4, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model4, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(model4, 
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects3 <- ggpredict(model4, terms=c("time1", "group"))# generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+
+
+#model 2 return quantity 
+
+df <- online2[c("salesvalue","returnvalue","returnquantity","year","month_dummy","day")]
+
+cor(df2) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+df2 <- online2[c("returnquantity","salesvalue","year","month_dummy","day")]
+vifcor(df2) # Calculates VIF scores after removing salesprice
+
+model6=lm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+logsalesq,data=online2)
+online2$logsalesq<-log(online2$salesquantity+1)
+stargazer(model2,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+
+#model2 return quantity
+poisson3 <- glm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+salesquantity,family="poisson",data=online2)
+
+
+stargazer(poisson3,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson3a <- glm(returnquantity~1, data=online2, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson3, poisson3a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+#check for heteroskedacity
+pred<-predict( glm(salesquantity ~ time1*group+avg_female+avg_age+avg_income,family="poisson",data=online2)) #obtain fitted values
+residual=resid(poisson1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(poisson1) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson1) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(poisson3, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(poisson3, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(poisson3, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(poisson3,poisson3,poisson3 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+#poisson not a good fit
+
+##neg bin
+
+negbin3 <- glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=online2)
+stargazer(negbin3,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin3a <- glm.nb(returnquantity ~ 1, data = online2) 
+
+lrtest(negbin3, negbin3a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson3, negbin3)
+
+
+# Obtain IRRs
+stargazer(negbin3, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) # We might be interested in looking at incident rate ratios rather than coefficients. To do this, we can exponentiate our model coefficients. The output indicates that the incident rate for channel = mail is 1.44 times the incident rate for the reference group (prog = newspaper). Likewise, the incident rate for prog = email is 2.93 times the incident rate for the reference group holding the other variables constant. The percent change in the incident rate of purchase quantity is a 7% increase for every unit increase in num_coupons.
+
+stargazer(negbin3, poisson3, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc hetero
+pred<-predict(glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=online2)) #obtain fitted values
+residual=resid(negbin3) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin3) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin3) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+
+consstder <- sqrt(diag(vcovHC(negbin3, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin3, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin3, online2$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin3, 
+          se=list(clusrobstder),apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c( "IRR Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin3, negbin3,negbin3 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+meffects2 <- ggpredict(negbin3, terms=c("time1","group")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrnquantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank()) 
+
+
+
+
+```
+
+```{r}
+###What is the impact of the policy change on physical store returns?
+
+
+stargazer(bm2, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+
+
+
+ggplot(bm2, aes(x=returnvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(returnvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm2, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm2, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+## Check Multicollineary
+df <- bm2[c("salesquantity","salesvalue","returnquantity","avg_female","avg_income","sa_avg_years_of_exp","store_average_price","sa_avg_rate_of_pay","store_number_of_skus")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+df2 <- online2[c("salesquantity","returnvalue","year","month_dummy","day")]
+vifcor(df2) # Calculates VIF scores after removing salesprice
+
+#model1 reutrnsvalue
+
+model7=lm(log(returnvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=bm2)
+bm2$logsalesv=log(bm2$salesvalue)
+
+anova(mod,mod,test="Chisq")
+stargazer(mod,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,data=bm2)) #obtain fitted values
+residual=resid(model11) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model7)  
+
+bptest(model7) 
+
+
+consstder <- sqrt(diag(vcovHC(model7, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model7, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model7, bm2$store_number))) # produces clustered robust standard errors
+
+stargazer(model7,
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+meffects3 <- ggpredict(model7, terms=c("time1", "group")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) # make the plot more self-readable
+
+
+
+
+
+
+
+#sales quantity
+poisson4<- glm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+salesquantity,data=bm2)
+
+
+stargazer(poisson4,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson4a <- glm(returnquantity~1, data=bm2, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson4, poisson4a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+#check for heteroskedacity
+pred1<-predict(glm(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,family="poisson",data=bm2) ) #obtain fitted values
+residual=resid(poisson2) # obtain residuals
+
+df <- data.frame(pred1,residual)
+ggplot(df, aes(y=residual, x=pred1)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(poisson2) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson2) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(poisson2, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(poisson2, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(poisson2, bm2$store_number))) # produces clustered robust standard errors
+
+stargazer(poisson2,poisson2,poisson2 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+##neg bin
+
+negbin4<- glm.nb(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+salesquantity+sales_volume_group,data=bm2)
+stargazer(negbin4,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin4a <- glm.nb(returnquantity ~ 1, data = bm2) 
+
+lrtest(negbin4, negbin4a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson4, negbin4)
+
+# Obtain IRRs
+
+stargazer(negbin4, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(negbin4, poisson4, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedasticity
+pred3<-predict(glm.nb(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,salesquantity,data=bm2)) #obtain fitted values
+residual=resid(negbin4) # obtain residuals
+
+df <- data.frame(pred3,residual)
+ggplot(df, aes(y=residual, x=pred3)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first
+
+gqtest(negbin4) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin4) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin4, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin4, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin4, bm2$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin4 , 
+          se=list(consstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin4,  
+          se=list(clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRR"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects2 <- ggpredict(negbin4, terms=c("time1","group")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrn quantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1"))  
+
+```
+
+```{r}
+#5.
+
+#A)what is the impact of policy change on sales for product level online channel? 
+online1=read.dta13("C:/Users/Dell/Downloads/Online store daily prod_cat sales-returns.dta")
+#online11=read.dta13("C:/Users/Dell/Downloads/Online store daily prod_cat sales-returns.dta")
+#online2=read.dta13("C:/Users/Dell/Downloads/Online store daily sales-returns.dta")
+#online=na.omit(online2)
+
+stargazer(online11, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+
+
+df2 <- online1[c("avg_age","avg_income","avg_female","product_category")]
+vifcor(df2) # Calculates VIF scores after removing salesprice
+
+#generate dummy for time and group
+
+online1$group=ifelse(online1$policy=="60 days" ,0,1)
+
+online1$time1=ifelse(online1$year==2013 & online1$month_dummy<10,0,1)
+
+
+#check for log sales 
+ggplot(online1, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(online1,aes(x=salesvalue))+geom_histogram(color="green")
+ggplot(online1,aes(x=log(salesvalue)))+geom_histogram(color="green")
+ggplot(online1,aes(x=returnvalue))+geom_histogram(color="green")
+ggplot(online1,aes(x=log(returnvalue)))+geom_histogram(color="green")
+
+ggplot(online1,aes(x=returnquantity))+geom_histogram(color="green")
+ggplot(online1,aes(x=log(returnquantity)))+geom_histogram(color="green")
+
+
+online1$avg_female <- ifelse(is.na(online1$avg_female), mean(online1$avg_female, na.rm=TRUE), online1$avg_female)
+online1$avg_age<- ifelse(is.na(online1$avg_age), mean(online1$avg_age, na.rm=TRUE), online1$avg_age)
+online1$avg_income <- ifelse(is.na(online1$avg_income), mean(online1$avg_income, na.rm=TRUE), online1$avg_income)
+
+
+#model1 sales value
+model9=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+factor(product_category),data=online1)
+
+
+stargazer(model9,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)) #obtain fitted values
+residual=resid(model1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model9) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model9) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model9, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model9, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model9, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(model9, 
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # displays normal/HW robust/clustered robust standard errors. With clustered robust standard errors, we find that two variables are no longer significant
+
+meffects3 <- ggpredict(model9, terms=c("time1", "group"))# generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+
+
+
+#model 2 sales quantity 
+
+
+model10=lm(salesquantity~time1+group+time1*group+avg_female+avg_age+avg_income+product_category,data=online1)
+m=lm(salesquantity~time1+group+time1*group+avg_female+avg_age+avg_income,data=online1)
+anova(m,model10,test="Chisq")
+stargazer(model10,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+meffects3 <- ggpredict(model10, terms=c("time1", "group")) # generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" ($)") +
+    labs(colour="group") + 
+    scale_colour_discrete(labels=c("0", "1")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+
+#check whether ols is right model 
+online1$pred_sales_quantity<-predict(model10) # let's look at the predicted purchase quantity for each observation in the data 
+
+ggplot(online1, aes(pred_purchase_quantity)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(online1$pred_sales_quantity)#####no ols range is negative
+
+
+
+
+
+poisson5 <- glm(salesquantity ~ time1*group+avg_female+avg_age+avg_income+factor(product_category),family="poisson",data=online1)
+
+
+stargazer(poisson5,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+## Model fit assessment 
+poisson5a <- glm(salesquantity~1, data=online1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson5, poisson5a) 
+#check for heteroskedacity
+pred<-predict( glm(salesquantity ~ time1*group+avg_female+avg_age+avg_income,family="poisson",data=online2)) #obtain fitted values
+residual=resid(poisson1) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(poisson1) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson1) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(poisson5, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(poisson5, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(poisson5, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(poisson5,poisson5,poisson5 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+##neg bin
+
+negbin5 <- glm.nb(salesquantity~time1+group+time1*group+avg_female+avg_age+avg_income+factor(product_category),data=online1)
+stargazer(negbin5,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# Model fit assessment
+negbin5a <- glm.nb(salesquantity ~ 1, data = online1) 
+
+lrtest(negbin5, negbin5a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson5, negbin5)
+
+# Obtain IRRs
+stargazer(negbin5, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(negbin1, poisson1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc hetero
+pred<-predict(glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+product_category,data=online1)) #obtain fitted values
+residual=resid(negbin5) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin5) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin5) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin5, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin5, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin5, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin5, 
+          se=list(clusrobstder),
+          title="Regression Results", type="text",  apply.coef = exp, t.auto=F, p.auto = F,
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin5, negbin5,negbin5 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+meffects3 <- ggpredict(negbin5, terms=c("time1", "group")) # generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" sales ") +
+    labs(colour="group") + 
+    scale_colour_discrete(labels=c("0", "1")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+
+
+```
+
+```{r}
+#B)online returns 
+
+stargazer(online1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+df <- online1[c("salesvalue","avg_income","avg_age","avg_female","product_category")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+#check for log sales 
+ggplot(online2, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+#ggplot(online2,aes(x=returnvalue))+geom_histogram(color="blue")
+ggplot(online1,aes(x=log(returnvalue)))+geom_histogram(color="blue")
+
+ggplot(online1,aes(x=returnquantity))+geom_histogram(color="blue")
+ggplot(online1,aes(x=log(returnquantity)))+geom_histogram(color="blue")
+
+
+ggplot(online1, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+#model1 return value
+
+model12=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+logsalesv+factor(product_category),data=online1)
+#model5=lm(log(returnvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)
+online1$logsalesv=log(online1$salesvalue+1)
+
+#anova(model5,model4,test="Chisq")
+
+stargazer(model12,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(returnvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+logsalesv+product_category,data=online1)) #obtain fitted values
+residual=resid(model12) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model12) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model12) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model12, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model12, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model12, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(model12 , 
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # displays normal/HW robust/clustered robust standard errors. With clustered robust standard errors, we find that two variables are no longer significant
+
+meffects3 <- ggpredict(model12, terms=c("time1", "group"))# generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) # make the plot more self-readable
+
+
+
+
+#model 2 return quantity 
+
+model13=lm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+logsalesq+product_category,data=online1)
+online1$logsalesq<-log(online1$salesquantity)
+stargazer(model13,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#check whether ols is right model 
+online1$pred_sales_quantity<-predict(model13) # let's look at the predicted purchase quantity for each observation in the data 
+
+#ggplot(mydata, aes(pred_purchase_quantity, fill = channel)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(online1$pred_sales_quantity)#####no ols range is negative
+
+
+
+
+
+poisson6 <- glm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+salesquantity+factor(product_category),family="poisson",data=online1)
+
+
+stargazer(poisson6,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) . 
+
+## Model fit assessment 
+poisson6a <- glm(returnquantity~1, data=online1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson6, poisson6a) 
+
+#check for heteroskedacity
+
+
+gqtest(poisson6) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(poisson6) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+
+##neg bin
+
+negbin6 <- glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity+factor(product_category),data=online1)
+stargazer(negbin6,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin6a <- glm.nb(returnquantity ~ 1, data = online1) 
+
+lrtest(negbin6, negbin6a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson6 ,negbin6)
+
+
+# Obtain IRRs
+stargazer(negbin6, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) # We might be interested in looking at incident rate ratios rather than coefficients. To do this, we can exponentiate our model coefficients. The output indicates that the incident rate for channel = mail is 1.44 times the incident rate for the reference group (prog = newspaper). Likewise, the incident rate for prog = email is 2.93 times the incident rate for the reference group holding the other variables constant. The percent change in the incident rate of purchase quantity is a 7% increase for every unit increase in num_coupons.
+
+stargazer(negbin6, poisson6, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc hetero
+pred<-predict(glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity+product_category,data=online1)) #obtain fitted values
+residual=resid(negbin6) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin6) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin6) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+
+consstder <- sqrt(diag(vcovHC(negbin6, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin6, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin6, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin6,negbin6,negbin6, 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin6,  
+          se=list(clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRR"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+meffects2 <- ggpredict(negbin6, terms=c("time1","group")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrn quantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) 
+
+
+
+
+```
+
+```{r}
+
+##What is the impact of the policy change on product level physical store sales?
+
+bm1=read.dta13("C:/Users/Dell/Downloads/BM store monthly prod_cat sales-returns.dta")
+#bm11=read.dta13("C:/Users/Dell/Downloads/BM store monthly prod_cat sales-returns.dta")
+stargazer(bm11, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+
+bm1$avg_female <- ifelse(is.na(bm1$avg_female), mean(bm1$avg_female, na.rm=TRUE), bm1$avg_female)
+bm1$avg_age<- ifelse(is.na(bm1$avg_age), mean(bm1$avg_age, na.rm=TRUE), bm1$avg_age)
+
+bm1$avg_income <- ifelse(is.na(bm1$avg_income), mean(bm1$avg_income, na.rm=TRUE), bm1$avg_income)
+bm1$store_average_price <- ifelse(is.na(bm1$store_average_price), mean(bm1$store_average_price, na.rm=TRUE), bm1$store_average_price)
+bm1$store_number_of_skus <- ifelse(is.na(bm1$store_number_of_skus), mean(bm1$store_number_of_skus, na.rm=TRUE), bm1$store_number_of_skus)
+bm1$sa_gender  <- ifelse(is.na(bm1$sa_gender ), mean(bm1$sa_gender , na.rm=TRUE), bm1$sa_gender )
+bm1$sa_full_time <- ifelse(is.na(bm1$sa_full_time), mean(bm1$sa_full_time, na.rm=TRUE), bm1$sa_full_time)
+bm1$sa_avg_years_of_exp <- ifelse(is.na(bm1$sa_avg_years_of_exp), mean(bm1$sa_avg_years_of_exp, na.rm=TRUE), bm1$sa_avg_years_of_exp)
+bm1$sa_married <- ifelse(is.na(bm1$sa_married), mean(bm1$sa_married, na.rm=TRUE), bm1$sa_married)
+bm1$sa_avg_rate_of_pay <- ifelse(is.na(bm1$sa_avg_rate_of_pay), mean(bm1$sa_avg_rate_of_pay, na.rm=TRUE), bm1$sa_avg_rate_of_pay)
+bm1$sa_dependent <- ifelse(is.na(bm1$sa_dependent), mean(bm1$sa_dependent, na.rm=TRUE), bm1$sa_dependent)
+bm1$sales_volume_group <- ifelse(is.na(bm1$sales_volume_group), mean(bm1$sales_volume_group, na.rm=TRUE), bm1$sales_volume_group)
+
+
+
+
+
+#check multicollinearity
+
+df <- bm1[c("avg_female","avg_age","avg_income","store_number_of_skus","sa_gender","sa_full_time","store_average_price","sa_avg_years_of_exp","sa_married","sa_avg_rate_of_pay","sa_dependent","sales_volume_group")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+#generate dummy for time and group
+
+bm1$group=ifelse(bm1$policy=="60 days" ,0,1)
+
+bm1$time1=ifelse(bm1$year==2013 & bm1$month_dummy<10,0,1)
+
+
+#check for log sales 
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green")
+
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green")
+
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green")
+
+
+
+#model1 salesvalue
+model14=lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+factor(product_category)+sales_volume_group,data=bm1)
+summary(model14)
+stargazer(model14,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+pred<-predict(lm(log(salesvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+product_category+sales_volume_group,data=bm1)) #obtain fitted values
+residual=resid(model11) # obtain residuals
+
+df <- data.frame(pred,residual)
+ggplot(df, aes(y=residual, x=pred)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(model14) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model14) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model14, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model14, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model14, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(model14,
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+meffects3 <- ggpredict(model14, terms=c("time1", "group")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+#significant 
+
+
+##model2 salesquantity
+
+
+poisson7 <- glm(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+factor(product_category),family="poisson",data=bm1)
+
+
+stargazer(poisson7,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson7a <- glm(salesquantity~1, data=bm1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson7, poisson7a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+
+
+##neg bin
+
+negbin7<- glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+factor(product_category)+sales_volume_group,data=bm1)
+stargazer(negbin7,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin7a <- glm.nb(salesquantity ~ 1, data = bm1) 
+
+lrtest(negbin7, negbin7a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson7, negbin7)
+
+# Obtain IRRs
+
+stargazer(negbin7, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) # We might be interested in looking at incident rate ratios rather than coefficients. To do this, we can exponentiate our model coefficients. The output indicates that the incident rate for channel = mail is 1.44 times the incident rate for the reference group (prog = newspaper). Likewise, the incident rate for prog = email is 2.93 times the incident rate for the reference group holding the other variables constant. The percent change in the incident rate of purchase quantity is a 7% increase for every unit increase in num_coupons.
+
+stargazer(negbin2, poisson2, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedacity
+pred3<-predict(glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,data=bm1)) #obtain fitted values
+residual=resid(negbin2) # obtain residuals
+
+df <- data.frame(pred3,residual)
+ggplot(df, aes(y=residual, x=pred3)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first. Do we observe heteroscedasticity?
+
+gqtest(negbin7) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model7) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin7, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin7, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin7, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin7,negbin7,negbin7 , 
+          se=list(consstder, HWrobstder,clusrobstder),apply.coef = exp,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"))
+
+
+stargazer(negbin7, se=list(clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects2 <- ggpredict(negbin7, terms=c("time1","group")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" salesquantity") +
+    labs(colour=" policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())
+
+
+```
+
+```{r}
+#prod level physical store returns
+stargazer(bm1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+
+
+
+ggplot(bm1, aes(x=returnvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(returnvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+## Check Multicollineary
+df <- bm1[c("salesquantity","salesvalue","returnquantity","avg_female","avg_income","sa_avg_years_of_exp","store_average_price","sa_avg_rate_of_pay","store_number_of_skus")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+bm1$prod=as.factor(bm1$product_category)
+levels(bm1$prod)
+
+#model1 reutrn value
+
+model15=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+factor(product_category)+sales_volume_group,data=bm1)
+bm1$logsalesv=log(bm1$salesvalue+1)
+
+
+
+#checkc for heteroskedacity
+
+gqtest(model15) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model15) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model15, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model15, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model15, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(model15, 
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+
+meffects3 <- ggpredict(model15, terms=c("time1", "group")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) # make the plot more self-readable
+
+
+
+
+
+
+#reutrn quantity 
+poisson8<- glm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+salesquantity+factor(product_category)+sales_volume_group,data=bm1)
+
+
+stargazer(poisson8,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson8a <- glm(returnquantity~1, data=bm1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson8, poisson8a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+
+
+##neg bin
+
+negbin8<- glm.nb(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+salesquantity+factor(product_category)+sales_volume_group,data=bm1)
+stargazer(negbin8,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin8a <- glm.nb(returnquantity ~ 1, data = bm1) 
+
+lrtest(negbin8, negbin8a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson8, negbin8)
+
+# Obtain IRRs
+
+stargazer(negbin4, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) # We might be interested in looking at incident rate ratios rather than coefficients. To do this, we can exponentiate our model coefficients. The output indicates that the incident rate for channel = mail is 1.44 times the incident rate for the reference group (prog = newspaper). Likewise, the incident rate for prog = email is 2.93 times the incident rate for the reference group holding the other variables constant. The percent change in the incident rate of purchase quantity is a 7% increase for every unit increase in num_coupons.
+
+stargazer(negbin4, poisson4, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedacity
+pred3<-predict(glm.nb(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus,salesquantity,data=bm1)) #obtain fitted values
+residual=resid(negbin4) # obtain residuals
+
+df <- data.frame(pred3,residual)
+ggplot(df, aes(y=residual, x=pred3)) + geom_point(size=2.5) # Let's check heteroscedasticity visually first
+
+gqtest(negbin8) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin8) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin8, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin8, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin8,bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin8,negbin8,negbin8, 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin8, se=list(clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs "),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+meffects2 <- ggpredict(negbin8, terms=c("time1","group")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrnquantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank()) 
+```
+
+
+```{r}
+#6) product level analysis:
+#on prod level online store sales
+online1=read.dta13("C:/Users/Dell/Downloads/Online store daily prod_cat sales-returns.dta")
+#online2=read.dta13("C:/Users/Dell/Downloads/Online store daily sales-returns.dta")
+#online=na.omit(online2)
+
+  
+stargazer(online1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+df2 <- online1[c("avg_age","avg_income","avg_female","product_category")]
+vifcor(df2) # Calculates VIF scores after removing salesprice
+
+#generate dummy for time and group
+
+online1$group=ifelse(online1$policy=="60 days" ,0,1)
+
+online1$time1=ifelse(online1$year==2013 & online1$month_dummy<10,0,1)
+
+
+#check for log sales 
+#ggplot(online1, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+#ggplot(online,aes(x=salesvalue))+geom_histogram(color="blue")
+ggplot(online,aes(x=log(returnvalue+1)))+geom_histogram(color="blue")
+
+ggplot(online1,aes(x=avg_income))+geom_histogram(color="blue")
+
+ggplot(online,aes(x=salesvalue))+geom_histogram(color="blue")
+
+
+online1$avg_female <- ifelse(is.na(online1$avg_female), mean(online1$avg_female, na.rm=TRUE), online1$avg_female)
+online1$avg_age<- ifelse(is.na(online1$avg_age), mean(online1$avg_age, na.rm=TRUE), online1$avg_age)
+online1$avg_income <- ifelse(is.na(online1$avg_income), mean(online1$avg_income, na.rm=TRUE), online1$avg_income)
+
+
+#model1 sales value
+
+model6a=lm(log(salesvalue+1)~
+             time1*group*prod+avg_female+avg_age+avg_income,data=online1)
+#model1=lm(salesvalue~time1+group+time1*group+log(returnvalue+1)+avg_female+avg_age+avg_income,data=online2)
+
+stargazer(model6a,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+gqtest(model6a) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model6a) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model6a, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model6a, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model6a, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(model6a,model6a,model6a , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # displays normal/HW robust/clustered robust standard errors. With clustered robust standard errors, we find that two variables are no longer significant
+online1$prod<-online1$factor(product_category)
+
+meffects3 <- ggpredict(model6a, terms=c("time1","group","prod[2,6,3")) # generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")+facet_wrap(~facet)
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+  facet_wrap(~facet)# make the plot more self-readable
+
+
+
+
+#subset
+mydataprodonline1 <- subset(online1, prod == 2) # generates a subset of data using observations only with product category 1
+model110=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset(online1, prod == 4) 
+model120=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(online1, prod == 6) 
+model130=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(online1, prod == 9) 
+model140=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(online1, prod == 11) 
+model150=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+
+mydataprodonline11 <- subset(online1, prod == 13) 
+model111=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+
+mydataprodonline16 <- subset(online1, prod == 16) # generates a subset of data using observations only with time ==0
+model116=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline16)
+clusrobstder116 <- sqrt(diag(cluster.vcov(model116, mydataprodonline16$store_number)))
+
+mydataprodonline17 <- subset(online1, prod == 17) # generates a subset of data using observations only with time ==0
+model117=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline17)
+clusrobstder117 <- sqrt(diag(cluster.vcov(model117, mydataprodonline17$store_number)))
+
+mydataprodonline19<- subset(online1, prod == 19) # generates a subset of data using observations only with time ==0
+model119=lm(log(salesvalue+1)~
+             time1*group+avg_female+avg_age+avg_income,data=mydataprodonline19)
+clusrobstder119 <- sqrt(diag(cluster.vcov(model119, mydataprodonline19$store_number)))
+
+
+stargazer(model110, model120, model130,model140,model150, model111,model116,model117,model119,
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder111,clusrobstder116,clusrobstder117,clusrobstder119),
+          title="Regression Results", type="text", 
+          
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#model 2 sales quantity 
+
+
+model16=lm(salesquantity~time1+group+time1*group*product_category+avg_female+avg_age+avg_income+product_category,data=online1)
+
+
+#check whether ols is right model 
+online1$pred_sales_quantity<-predict(model16) # let's look at the predicted purchase quantity for each observation in the data 
+
+ggplot(online2, aes(pred_purchase_quantity)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(online1$pred_sales_quantity)#####no ols range is negative
+
+
+
+
+
+poisson9 <- glm(salesquantity ~ time1*group*prod+avg_female+avg_age+avg_income,family="poisson",data=online1)
+
+
+stargazer(poisson9,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson9a <- glm(salesquantity~1, data=online1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson9, poisson9a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+
+
+##neg bin
+
+negbin9 <- glm.nb(salesquantity~time1*group*prod+avg_female+avg_age+avg_income,data=online1)
+stargazer(negbin9,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin9a <- glm.nb(salesquantity ~ 1, data = online1) 
+
+lrtest(negbin9, negbin9a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson9, negbin9)
+
+# Obtain IRRs
+stargazer(negbin9, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) # We might be interested in looking at incident rate ratios rather than coefficients. To do this, we can exponentiate our model coefficients. The output indicates that the incident rate for channel = mail is 1.44 times the incident rate for the reference group (prog = newspaper). Likewise, the incident rate for prog = email is 2.93 times the incident rate for the reference group holding the other variables constant. The percent change in the incident rate of purchase quantity is a 7% increase for every unit increase in num_coupons.
+
+stargazer(negbin1, poisson1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc hetero
+
+gqtest(negbin9) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+
+
+
+consstder <- sqrt(diag(vcovHC(negbin9, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin9, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin9, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin9,negbin9,negbin9, 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+stargazer(negbin9, negbin9,negbin9, 
+          se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+meffects3 <- ggpredict(negbin9, terms=c( "time1","group","prod[4,7,9,12,13,21]"))# generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")+
+  facet_wrap(~facet)
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" sales quantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) + facet_wrap(~facet)# make the plot more self-readable
+
+#chekc for significance 
+mydataprodonline1 <- subset(online1, prod == 4) # generates a subset of data using observations only with product category 1
+model110=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset(online1, prod == 5) 
+model120=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(online1, prod == 6) 
+model130=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(online1, prod == 9) 
+model140=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(online1, prod == 11) 
+model150=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(online1, prod == 12) 
+model160=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+mydataprodonline11 <- subset(online1, prod == 13) 
+model111=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+mydataprodonline12 <- subset(online1, prod == 15) # generates a subset of data using observations only with time ==0
+model112=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline12)
+clusrobstder112 <- sqrt(diag(cluster.vcov(model112, mydataprodonline12$store_number)))
+
+mydataprodonline13 <- subset(online1, prod== 16) # generates a subset of data using observations only with time ==0
+model113=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+mydataprodonline15 <- subset(online1, prod == 20) # generates a subset of data using observations only with time ==0
+model115=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline15)
+clusrobstder115 <- sqrt(diag(cluster.vcov(model115, mydataprodonline15$store_number)))
+
+mydataprodonline16 <- subset(online1, prod == 21) # generates a subset of data using observations only with time ==0
+model116=glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income,data=mydataprodonline16)
+clusrobstder116 <- sqrt(diag(cluster.vcov(model116, mydataprodonline16$store_number)))
+
+
+
+stargazer(model110, model120, model130,model140,model150,model160, model111,model115, model116,
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder16,clusrobstder111,clusrobstder115,clusrobstder116),apply.coef = exp, t.auto = F,p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 4","PC 5","PC 7","PC 9","PC 11","PC 12","PC 13","PC 20","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model112, model113,
+          title="Regression Results", type="text", apply.coef = exp, t.auto=F, p.auto = F,
+          column.labels=c("PC 15","PC 6","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+
+```
+
+
+```{r}
+#6)online return
+
+stargazer(online1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+
+## Check Multicollineary
+df <- online1[c("salesvalue","avg_income","avg_age","avg_female","product_category")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+
+#check for log sales 
+ggplot(online2, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+#ggplot(online2,aes(x=returnvalue))+geom_histogram(color="blue")
+ggplot(online1,aes(x=log(returnvalue)))+geom_histogram/
+
+
+ggplot(online1, aes(x=salesquantity)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(online1, aes(x=log(salesquantity))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+
+#model1 return value
+
+model17=lm(log(returnvalue+1)~time1*group*prod+avg_female+avg_age+avg_income+logsalesv,data=online1)
+#model5=lm(log(returnvalue+1)~time1+group+time1*group+avg_female+avg_age+avg_income,data=online2)
+online1$logsalesv=log(online1$salesvalue+1)
+
+#anova(model5,model4,test="Chisq")
+
+stargazer(model17,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+gqtest(model17) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model17) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model17, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model17, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model17, online1$store_number))) # produces clustered robust standard errors
+
+
+stargazer(model17 , 
+          se=list(clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # displays normal/HW robust/clustered robust standard errors. With clustered robust standard errors, we find that two variables are no longer significant
+
+meffects3 <- ggpredict(model17, terms=c("time1","group","prod[13,14,17]"))# generates a tidy data frame  
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return$")+ facet_wrap(~facet)
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1"))+ facet_wrap(~facet)# make the plot more self-readable
+
+
+############subset 
+mydataprodonline1 <- subset(online1, prod== 13) # generates a subset of data using observations only with product category 1
+model13=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+logsalesv,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model13, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset(online1, product_category == 14) 
+model14=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+logsalesv,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model14, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(online1, product_category == 17) 
+model17=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+logsalesv,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model17, mydataprodonline3$store_number)))
+
+
+
+stargazer( model13,model14,model17,
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13),
+          title="Regression Results", type="text", 
+          column.labels=c("PC 1","PC 2","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+
+
+
+
+
+#model 2 return quantity 
+
+
+model13=lm(returnquantity~time1+group+time1*group+avg_female+avg_age+avg_income+logsalesq+product_category,data=online1)
+online1$logsalesq<-log(online1$salesquantity)
+stargazer(model13,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+
+#check whether ols is right model 
+online1$pred_sales_quantity<-predict(model13) # let's look at the predicted purchase quantity for each observation in the data 
+
+#ggplot(mydata, aes(pred_purchase_quantity, fill = channel)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(online1$pred_sales_quantity)#####no ols range is negative
+
+
+
+
+
+poisson10 <- glm(returnquantity~time1+group+time1*group*prod+avg_female+avg_age+avg_income+salesquantity+product_category,na.action=na.fail,family="poisson",data=online1)
+
+
+stargazer(poisson10,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson10a <- glm(returnquantity~1, data=online1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson10, poisson10a) 
+
+
+##neg binlevel
+
+
+negbin10 <- glm.nb(returnquantity~time1*group*prod+avg_female+avg_age+avg_income+salesquantity,data=online1)
+
+summary(negbin10)
+#negbin10 <- glm.nb(returnquantity~time1*group*prod+avg_female+avg_age+avg_income+salesquantity,data=online1)
+stargazer(negbin10,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# Model fit assessment
+
+negbin10a <- glm.nb(returnquantity ~ 1, data = online1) 
+
+lrtest(negbin10, negbin10a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson10 ,negbin10)
+
+
+# Obtain IRRs
+stargazer(negbin10, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#chekc hetero
+
+
+gqtest(negbin10) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin10) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+
+consstder <- sqrt(diag(vcovHC(negbin10, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin10, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin10, online1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin10, negbin10, se=list(consstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+summary(poisson10)
+
+
+meffects3 <- ggpredict(negbin10, terms=c("time1","group","prod") )# generates a tidy data frame  
+levels(bm1$prod)
+
+
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrnquantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank())+ facet_wrap(~facet) 
+
+#chekc subset
+mydataprodonline1 <- subset(online1, prod == 1) # generates a subset of data using observations only with product category 1
+model110=glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset( online1, prod == 2) 
+model120= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(online1, prod == 3) 
+model130= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(online1, prod == 4) 
+model140= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(online1, prod == 5) 
+model150= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(online1, prod == 6) 
+model160= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+mydataprodonline11 <- subset(online1, prod == 7) 
+model111= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+mydataprodonline12 <- subset(online1, prod == 8) # generates a subset of data using observations only with time ==0
+model112= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline12)
+clusrobstder112 <- sqrt(diag(cluster.vcov(model112, mydataprodonline12$store_number)))
+
+mydataprodonline13 <- subset(online1, prod== 9) # generates a subset of data using observations only with time ==0
+model113= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+
+mydataprodonline14 <- subset(online1, prod== 10) # generates a subset of data using observations only with time ==0
+model114= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline14)
+clusrobstder114 <- sqrt(diag(cluster.vcov(model114, mydataprodonline14$store_number)))
+
+mydataprodonline15 <- subset(online1, prod== 11) # generates a subset of data using observations only with time ==0
+model115= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline15)
+clusrobstder115 <- sqrt(diag(cluster.vcov(model115, mydataprodonline15$store_number)))
+
+
+mydataprodonline16 <- subset(online1, prod== 12) # generates a subset of data using observations only with time ==0
+model116= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline16)
+clusrobstder116 <- sqrt(diag(cluster.vcov(model116, mydataprodonline16$store_number)))
+
+mydataprodonline17 <- subset(online1, prod== 13) # generates a subset of data using observations only with time ==0
+model117= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline17)
+clusrobstder117<- sqrt(diag(cluster.vcov(model117, mydataprodonline17$store_number)))
+
+mydataprodonline18 <- subset(online1, prod== 14) # generates a subset of data using observations only with time ==0
+model118= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline18)
+clusrobstder118 <- sqrt(diag(cluster.vcov(model118, mydataprodonline18$store_number)))
+
+mydataprodonline19 <- subset(online1, prod== 15) # generates a subset of data using observations only with time ==0
+model119= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline19)
+clusrobstder119 <- sqrt(diag(cluster.vcov(model119, mydataprodonline19$store_number)))
+
+mydataprodonline20 <- subset(online1, prod== 16) # generates a subset of data using observations only with time ==0
+model120= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline20)
+clusrobstder120 <- sqrt(diag(cluster.vcov(model120, mydataprodonline20$store_number)))
+
+mydataprodonline21 <- subset(online1, prod== 17) # generates a subset of data using observations only with time ==0
+model121= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline21)
+clusrobstder121 <- sqrt(diag(cluster.vcov(model121, mydataprodonline21$store_number)))
+
+
+
+mydataprodonline24 <- subset(online1, prod== 20) # generates a subset of data using observations only with time ==0
+model124= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline24)
+clusrobstder124 <- sqrt(diag(cluster.vcov(model124, mydataprodonline24$store_number)))
+
+mydataprodonline25 <- subset(online1, prod== 21) # generates a subset of data using observations only with time ==0
+model125= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+salesquantity,data=mydataprodonline25)
+clusrobstder125 <- sqrt(diag(cluster.vcov(model125, mydataprodonline25$store_number)))
+
+
+
+stargazer(model110, model140,model150,model160,model111,model116,model117,model125,
+          se=list(clusrobstder11,clusrobstder14,clusrobstder15,clusrobstder16,clusrobstder111,clusrobstder116,clusrobstder117,clusrobstder125),
+          title="Regression Results", type="text",apply.coef = exp,t.auto=F,p.auto=F, 
+          
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model111,model116,model117 , apply.coef = exp,t.auto=F,p.auto=F, se=list(clusrobstder111,clusrobstder113,clusrobstder115,clusrobstder116,clusrobstder117),title="Regression Results", type="text", digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+stargazer(model118,model121,model124,model125 ,  se=list(clusrobstder118,clusrobstder121,clusrobstder124,clusrobstder125),title="Regression Results",  type="text",  df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001),apply.coef = exp,t.auto=F,p.auto=F)
+
+```
+
+```{r}
+
+##physical store sales
+
+
+stargazer(bm1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+
+bm1$avg_female <- ifelse(is.na(bm1$avg_female), mean(bm1$avg_female, na.rm=TRUE), bm1$avg_female)
+bm1$avg_age<- ifelse(is.na(bm1$avg_age), mean(bm1$avg_age, na.rm=TRUE), bm1$avg_age)
+
+bm1$avg_income <- ifelse(is.na(bm1$avg_income), mean(bm1$avg_income, na.rm=TRUE), bm1$avg_income)
+bm1$store_average_price <- ifelse(is.na(bm1$store_average_price), mean(bm1$store_average_price, na.rm=TRUE), bm1$store_average_price)
+bm1$store_number_of_skus <- ifelse(is.na(bm1$store_number_of_skus), mean(bm1$store_number_of_skus, na.rm=TRUE), bm1$store_number_of_skus)
+bm1$sa_gender  <- ifelse(is.na(bm1$sa_gender ), mean(bm1$sa_gender , na.rm=TRUE), bm1$sa_gender )
+bm1$sa_full_time <- ifelse(is.na(bm1$sa_full_time), mean(bm1$sa_full_time, na.rm=TRUE), bm1$sa_full_time)
+bm1$sa_avg_years_of_exp <- ifelse(is.na(bm1$sa_avg_years_of_exp), mean(bm1$sa_avg_years_of_exp, na.rm=TRUE), bm1$sa_avg_years_of_exp)
+bm1$sa_married <- ifelse(is.na(bm1$sa_married), mean(bm1$sa_married, na.rm=TRUE), bm1$sa_married)
+bm1$sa_avg_rate_of_pay <- ifelse(is.na(bm1$sa_avg_rate_of_pay), mean(bm1$sa_avg_rate_of_pay, na.rm=TRUE), bm1$sa_avg_rate_of_pay)
+bm1$sa_dependent <- ifelse(is.na(bm1$sa_dependent), mean(bm1$sa_dependent, na.rm=TRUE), bm1$sa_dependent)
+bm1$sales_volume_group <- ifelse(is.na(bm1$sales_volume_group), mean(bm1$sales_volume_group, na.rm=TRUE), bm1$sales_volume_group)
+
+
+
+
+
+#check multicollinearity
+
+df <- bm1[c("group","product_category","salesquantity","returnquantity","group","time1")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+#generate dummy for time and group
+
+bm1$group=ifelse(bm1$policy=="60 days" ,0,1)
+
+bm1$time1=ifelse(bm1$year==2013 & bm1$month_dummy<10,0,1)
+
+
+#check for log sales 
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm1, aes(x=avg_income)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(store_average_price))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm1, aes(x=sa_avg_rate_of_pay)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(sa_avg_rate_of_pay))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+
+#model1 salesvalue
+model01=lm(log(salesvalue+1)~time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm1)
+bm1$prod=factor(bm1$product_category)
+stargazer(model01,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+#checkc for heteroskedacity
+
+
+
+gqtest(model01) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model01) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model01, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model01, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model01, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(model01,model01,model01 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+meffects3 <- ggpredict(model01, terms=c("time1", "group","prod")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")+facet_wrap(~facet)
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +facet_wrap(~facet)# make the plot more self-readable
+#significant 
+
+#chekc for significance 
+mydataprodonline1 <- subset(bm1, prod == 1) # generates a subset of data using observations only with product category 1
+model110=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset( bm1, prod == 2) 
+model120=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(bm1, prod == 3) 
+model130=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(bm1, prod == 4) 
+model140=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(bm1, prod == 6) 
+model150=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(bm1, prod == 8) 
+model160=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+mydataprodonline11 <- subset(bm1, prod == 10) 
+model111=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+mydataprodonline12 <- subset(bm1, prod == 12) # generates a subset of data using observations only with time ==0
+model112=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline12)
+clusrobstder112 <- sqrt(diag(cluster.vcov(model112, mydataprodonline12$store_number)))
+
+mydataprodonline13 <- subset(bm1, prod== 17) # generates a subset of data using observations only with time ==0
+model113=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+mydataprodonline15 <- subset(bm1, prod == 20) # generates a subset of data using observations only with time ==0
+model115=lm(log(salesvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline15)
+clusrobstder115 <- sqrt(diag(cluster.vcov(model115, mydataprodonline15$store_number)))
+
+
+
+
+
+stargazer(model110, model120, model130,model140,model150,model160, model111,model112,model113,model115, 
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder16,clusrobstder111,clusrobstder112,clusrobstder113,clusrobstder115),
+          title="Regression Results", type="text", 
+          column.labels=c("PC 1","PC 2","PC 3","PC 4","PC 6","PC 8","PC 10","PC 12","PC 17","20"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model112, model113,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 15","PC 6","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+
+
+
+
+
+
+
+
+##model2 salesquantity
+
+model02=lm(salesquantity~time1+group+time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+factor(product_category),data=bm1)
+
+#check whether ols is right model 
+bm1$sales_quantity<-predict(model0) # let's look at the predicted purchase quantity for each observation in the data 
+
+#ggplot(mydata, aes(pred_purchase_quantity, fill = channel)) +
+  geom_histogram(binwidth=.5, position="dodge")
+
+range(bm1$sales_quantity)#####no ols range is negative
+
+
+
+
+
+poisson7 <- glm(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+factor(product_category),family="poisson",data=bm1)
+
+
+stargazer(poisson7,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson7a <- glm(salesquantity~1, data=bm1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson7, poisson7a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+
+##neg bin
+
+negbin11<- glm.nb(salesquantity~time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=bm1)
+stargazer(negbin11,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin11a <- glm.nb(salesquantity ~ 1, data = bm1) 
+
+lrtest(negbin11, negbin11a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson7, negbin11)
+
+
+# Obtain IRRs
+
+stargazer(negbin11, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedacity
+
+
+gqtest(negbin11) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin11) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin11, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin11, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin11, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin11,negbin11,negbin11 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"))
+
+
+stargazer(negbin11, negbin11,negbin11,se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects2 <- ggpredict(negbin11, terms=c("time1","group","prod")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" salesquantity") +
+    labs(colour=" policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    facet_wrap(~facet)
+
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")+facet_wrap(~facet)
+
+
+#chekc subset 
+
+mydataprodonline1 <- subset(bm1, prod == 2) # generates a subset of data using observations only with product category 1
+model110=negbin11<- glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset( bm1, prod == 7) 
+model120= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(bm1, prod == 8) 
+model130= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(bm1, prod == 9) 
+model140= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(bm1, prod == 10) 
+model150= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(bm1, prod == 12) 
+model160= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+mydataprodonline11 <- subset(bm1, prod == 14) 
+model111= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+mydataprodonline12 <- subset(bm1, prod == 15) # generates a subset of data using observations only with time ==0
+model112= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline12)
+clusrobstder112 <- sqrt(diag(cluster.vcov(model112, mydataprodonline12$store_number)))
+
+mydataprodonline13 <- subset(bm1, prod== 21) # generates a subset of data using observations only with time ==0
+model113= glm.nb(salesquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+
+
+stargazer(model110, model120, model130,model140,model150,model160, model111,model112,model113, 
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder16,clusrobstder111,clusrobstder112,clusrobstder113),apply.coef = exp, t.auto=F, p.auto = T,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 2","PC 7","PC 8","PC 9","PC 10","pc 12","PC 14","PC 15","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model112, model113,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 15","PC 6","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+```
+
+```{r}
+###What is the impact of the policy change on physical store returns?
+
+
+stargazer(bm1, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics") 
+bm1$prod<-as.factor(bm1$product_category)
+is.factor(bm1$prod)
+ggplot(bm1, aes(x=returnvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(returnvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+ggplot(bm1, aes(x=salesvalue)) + geom_histogram(colour="green") #Histogram of sales
+ggplot(bm1, aes(x=log(salesvalue))) + geom_histogram(colour="green") #Histogram of log(sales)
+
+## Check Multicollineary
+df <- bm1[c("salesquantity","salesvalue","returnquantity","avg_female","avg_income","sa_avg_years_of_exp","store_average_price","sa_avg_rate_of_pay","store_number_of_skus")]
+
+cor(df) # Generates the correlation matrix
+vifcor(df) # Calculates VIF scores
+
+
+
+#model1 reutrnsvalue
+
+model09=lm(log(returnvalue+1)~time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=bm1)
+bm1$logsalesv=log(bm1$salesvalue+1)
+
+
+
+
+#checkc for heteroskedacity
+
+
+
+gqtest(model09) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(model09) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(model09, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(model09, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(model09, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(model09,model09,model09 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  
+
+meffects3 <- ggpredict(model09, terms=c("time1", "group","prod")) # generates a tidy data frame  
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" Sales")+facet_wrap(~facet)
+
+ggplot(meffects3,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" return ($)") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +facet_wrap(~facet)
++
+    theme(axis.title.x=element_blank())# make the plot more self-readable
+
+
+
+#chekc subset 
+
+mydataprodonline1 <- subset(bm1, prod == 1) # generates a subset of data using observations only with product category 1
+model110=lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+mydataprodonline2 <- subset( bm1, prod == 2) 
+model120= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline2)
+clusrobstder12 <- sqrt(diag(cluster.vcov(model120, mydataprodonline2$store_number)))
+
+mydataprodonline3 <- subset(bm1, prod == 5) 
+model130= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline3)
+clusrobstder13 <- sqrt(diag(cluster.vcov(model130, mydataprodonline3$store_number)))
+
+mydataprodonline4 <- subset(bm1, prod == 6) 
+model140= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group+product_category,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(bm1, prod == 7) 
+model150= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(bm1, prod == 11) 
+model160= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group+product_category,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+mydataprodonline11 <- subset(bm1, prod == 13) 
+model111= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline11)
+clusrobstder111 <- sqrt(diag(cluster.vcov(model111, mydataprodonline11$store_number)))
+
+mydataprodonline12 <- subset(bm1, prod == 14) # generates a subset of data using observations only with time ==0
+model112= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group+product_category,data=mydataprodonline12)
+clusrobstder112 <- sqrt(diag(cluster.vcov(model112, mydataprodonline12$store_number)))
+
+mydataprodonline13 <- subset(bm1, prod== 15) # generates a subset of data using observations only with time ==0
+model113= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+
+mydataprodonline14 <- subset(bm1, prod== 16) # generates a subset of data using observations only with time ==0
+model114= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline14)
+clusrobstder114 <- sqrt(diag(cluster.vcov(model114, mydataprodonline14$store_number)))
+
+mydataprodonline15 <- subset(bm1, prod== 17) # generates a subset of data using observations only with time ==0
+model115= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline15)
+clusrobstder115 <- sqrt(diag(cluster.vcov(model115, mydataprodonline15$store_number)))
+
+
+mydataprodonline16 <- subset(bm1, prod== 18) # generates a subset of data using observations only with time ==0
+model116= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group+product_category,data=mydataprodonline16)
+clusrobstder116 <- sqrt(diag(cluster.vcov(model116, mydataprodonline16$store_number)))
+
+mydataprodonline17 <- subset(bm1, prod== 19) # generates a subset of data using observations only with time ==0
+model117= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline17)
+clusrobstder117<- sqrt(diag(cluster.vcov(model117, mydataprodonline17$store_number)))
+
+mydataprodonline18 <- subset(bm1, prod== 20) # generates a subset of data using observations only with time ==0
+model118= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline18)
+clusrobstder118 <- sqrt(diag(cluster.vcov(model118, mydataprodonline18$store_number)))
+
+mydataprodonline19 <- subset(bm1, prod== 21) # generates a subset of data using observations only with time ==0
+model119= lm(log(returnvalue+1)~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+logsalesv+sales_volume_group,data=mydataprodonline19)
+clusrobstder119 <- sqrt(diag(cluster.vcov(model119, mydataprodonline19$store_number)))
+
+
+
+stargazer(model110, model120, model130,model140,model150,model160, 
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder16),
+          title="Regression Results", type="text", 
+          
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model111,model112,model113, model114,model115,model116,model117,model118,model119,    se=list(clusrobstder111,clusrobstder112,clusrobstder113,clusrobstder114,clusrobstder115,clusrobstder116,clusrobstder117,clusrobstder118,clusrobstder119),title="Regression Results", type="text",  df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+stargazer(model112, model113,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 15","PC 6","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+
+
+
+#return quantity
+
+poisson11<- glm(returnquantity~time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+salesquantity,data=bm1)
+
+
+stargazer(poisson4,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for num_coupons is .07.This means that the expected log count for a one-unit increase in num_coupons is .07. The indicator variable channel email compares between channel = "email" and channel = "newspaper", the expected log count for prog = "email" increases by about 1.08. The indicator variable channel.mail is the expected difference in log count (approx 0.37) between channel = "mail" and the reference group (channel = "newspaper"). 
+
+## Model fit assessment 
+poisson11a <- glm(returnquantity~1, data=bm1, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson11, poisson11a) # We can use the residual deviance to perform a goodness of fit test for the overall model. The residual deviance is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed. Therefore, if the residual difference is small enough, the goodness of fit test will not be significant, indicating that the model fits the data. We conclude that the model does not fit because the goodness-of-fit chi-squared test is 98.22 and statistically significant. If the test had not been statistically significant, it would indicate that the data fit the model well.
+
+
+
+##neg bin
+
+negbin19<- glm.nb(returnquantity~time1*group*prod+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=bm1)
+
+
+summary(negbin19)
+stargazer(negbin19,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable num_coupons has a coefficient of 0.07, which is statistically significant. This means that for each one-unit increase in num_coupons, the expected log count of purchase quantity increases by 0.07. The indicator variable shown as channelfactormail is the expected difference in log count between group 2 and the reference group (channel=newspaper). The expected log count for level 2 of channel is 0.37 higher than the expected log count for level 1. The expected log count for level 3 of channel is 1.07 higher than the expected log count for level 1.
+
+# Model fit assessment
+negbin19 <- glm.nb(returnquantity ~ 1, data = bm1) 
+
+lrtest(negbin19, negbin19a) # # Model fits the data because LR test statistics (70.93) is  significant.
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson11, negbin19)
+
+# Obtain IRRs
+
+stargazer(negbin19, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+#chekc heteroskedacity
+
+
+gqtest(negbin19) # Significant Goldfeld-Quandt test indicates heteroscedasticity 
+
+bptest(negbin19) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+
+consstder <- sqrt(diag(vcovHC(negbin19, type="const"))) # produces normal standard errors
+
+HWrobstder <- sqrt(diag(vcovHC(negbin19, type="HC1"))) # produces Huber-White robust standard errors 
+clusrobstder <- sqrt(diag(cluster.vcov(negbin19, bm1$store_number))) # produces clustered robust standard errors
+
+stargazer(negbin19,negbin19,negbin19 , 
+          se=list(consstder, HWrobstder,clusrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE", "Clustered SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(negbin19, negbin19,negbin19 , se=list(consstder, HWrobstder,clusrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001)) 
+
+meffects2 <- ggpredict(negbin19, terms=c("time1","group","prod")) # generates a tidy data frame at three different values of competence  
+
+ggplot(meffects2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+    xlab("time") + ylab(" reutrnquantity") +
+    labs(colour="return policy change?") + 
+    scale_colour_discrete(labels=c("No change in policy", "change in policy from 90 to 45 days")) +
+    scale_x_continuous(breaks=c(0,1), labels=c("0", "1")) +
+    theme(axis.title.x=element_blank()) 
+
+summary(negbin19)
+#chekc subset 
+
+mydataprodonline1 <- subset(bm1, prod == 1) # generates a subset of data using observations only with product category 1
+model110=glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,data=mydataprodonline1)
+clusrobstder11 <- sqrt(diag(cluster.vcov(model110, mydataprodonline1$store_number)))
+
+
+mydataprodonline4 <- subset(bm1, prod == 4) 
+model140= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline4)
+clusrobstder14 <- sqrt(diag(cluster.vcov(model140, mydataprodonline4$store_number)))
+
+mydataprodonline5 <- subset(bm1, prod == 5) 
+model150= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline5)
+clusrobstder15 <- sqrt(diag(cluster.vcov(model150, mydataprodonline5$store_number)))
+
+mydataprodonline6 <- subset(bm1, prod == 6) 
+model160= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline6)
+clusrobstder16 <- sqrt(diag(cluster.vcov(model160, mydataprodonline6$store_number)))
+
+
+mydataprodonline13 <- subset(bm1, prod== 9) # generates a subset of data using observations only with time ==0
+model113= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline13)
+clusrobstder113 <- sqrt(diag(cluster.vcov(model113, mydataprodonline13$store_number)))
+
+
+mydataprodonline14 <- subset(bm1, prod== 10) # generates a subset of data using observations only with time ==0
+model114= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline14)
+clusrobstder114 <- sqrt(diag(cluster.vcov(model114, mydataprodonline14$store_number)))
+
+
+
+
+mydataprodonline16 <- subset(bm1, prod== 12) # generates a subset of data using observations only with time ==0
+model116= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline16)
+clusrobstder116 <- sqrt(diag(cluster.vcov(model116, mydataprodonline16$store_number)))
+
+mydataprodonline17 <- subset(bm1, prod== 13) # generates a subset of data using observations only with time ==0
+model117= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline17)
+clusrobstder117<- sqrt(diag(cluster.vcov(model117, mydataprodonline17$store_number)))
+
+
+
+mydataprodonline25 <- subset(bm1, prod== 21) # generates a subset of data using observations only with time ==0
+model125= glm.nb(returnquantity~time1*group+avg_female+avg_age+avg_income+sa_avg_years_of_exp+store_average_price+sa_avg_rate_of_pay+store_number_of_skus+sales_volume_group+salesquantity,na.action=na.omit,data=mydataprodonline25)
+clusrobstder125 <- sqrt(diag(cluster.vcov(model125, mydataprodonline25$store_number)))
+
+
+
+stargazer(model110, model140,model150,model160,model111,model113,model114,model116,model117,model125,
+          se=list(clusrobstder11,clusrobstder12,clusrobstder13,clusrobstder14,clusrobstder15,clusrobstder16,clusrobstder111,clusrobstder113,clusrobstder114,clusrobstder116,clusrobstder117,clusrobstder125),
+          title="Regression Results", type="text",apply.coef = exp,t.auto=F,p.auto=F, 
+          
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+stargazer(model111,model112,model113, model114,model115,model116,model117 ,  se=list(clusrobstder111,clusrobstder112,clusrobstder113,clusrobstder114,clusrobstder115,clusrobstder116,clusrobstder117),title="Regression Results", type="text", apply.coef = exp,t.auto=F,p.auto=F,  df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+stargazer(model118,model119,model120,model121,model124,model125 ,  se=list(clusrobstder118,clusrobstder119,clusrobstder120,clusrobstder121,clusrobstder124,clusrobstder125),title="Regression Results",apply.coef = exp,t.auto=F,p.auto=F,  type="text",  df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+stargazer(model112, model113,
+          title="Regression Results", type="text", 
+          column.labels=c("PC 15","PC 6","PC 3","PC 4","PC 5","PC 6","PC 11","PC 12","PC 13","PC 17","PC 21"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+```
+
+
